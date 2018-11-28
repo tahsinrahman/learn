@@ -1,0 +1,54 @@
+* Concepts
+
+** overview
+- we use kubernetes api objects to describe cluster's desired state
+  - what applications to run
+  - what container image they use
+  - no of raplicas
+  - network and disk/cpu usage
+
+- kubernetes performs variety of tasks automatically
+  - starting/restarting containers
+  - scaling no of replicas
+ 
+- kubernetes master- three processes that run on a single node
+  - kube-apiserver
+  - kube-controller-manager
+  - kube-scheduler
+ 
+- other/worker node - two processes on each node
+  - kubelet: communicates with the master
+  - kube-proxy: proxy network that reflects networking services on each node
+  
+** kubernetes-objects
+- basic objects
+  - pod
+  - service
+  - volume
+  - namespace
+  
+- high level abstractions: controllers
+  - based on basic objects
+  - provides additional functionality
+    
+- controllers
+  - replicaset
+  - deployment
+  - statefulset
+  - daemonset
+  - job
+  
+** kubernetes control plane
+- govern how kubernetes communicates with the cluster
+- maintains record of all objects
+- runs continuous loop to manage those objects state
+- responses to change in the claster: work to make actual state to match desired state for all objects
+
+
+*** kubernetes master
+- maintains desired state of the cluster
+
+*** kubernetes nodes
+- machines (vm/physical server)
+- run apps
+- managed my master
