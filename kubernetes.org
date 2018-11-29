@@ -1,44 +1,42 @@
-* Concepts
-
-** overview
+* overview
 - we use kubernetes api objects to describe cluster's desired state
-  - what applications to run
-  - what container image they use
-  - no of raplicas
-  - network and disk/cpu usage
+- what applications to run
+- what container image they use
+- no of raplicas
+- network and disk/cpu usage
 
 - kubernetes performs variety of tasks automatically
-  - starting/restarting containers
-  - scaling no of replicas
- 
+- starting/restarting containers
+- scaling no of replicas
+
 - kubernetes master- three processes that run on a single node
-  - kube-apiserver
-  - kube-controller-manager
-  - kube-scheduler
- 
+- kube-apiserver
+- kube-controller-manager
+- kube-scheduler
+
 - other/worker node - two processes on each node
-  - kubelet: communicates with the master
-  - kube-proxy: proxy network that reflects networking services on each node
-  
-** kubernetes-objects
+- kubelet: communicates with the master
+- kube-proxy: proxy network that reflects networking services on each node
+
+* kubernetes-objects
 - basic objects
-  - pod
-  - service
-  - volume
-  - namespace
-  
+- pod
+- service
+- volume
+- namespace
+
 - high level abstractions: controllers
-  - based on basic objects
-  - provides additional functionality
-    
+- based on basic objects
+- provides additional functionality
+
 - controllers
-  - replicaset
-  - deployment
-  - statefulset
-  - daemonset
-  - job
-  
-** kubernetes control plane
+- replicaset
+- deployment
+- statefulset
+- daemonset
+- job
+
+* kubernetes control plane
 - govern how kubernetes communicates with the cluster
 - maintains record of all objects
 - runs continuous loop to manage those objects state
@@ -52,3 +50,174 @@
 - machines (vm/physical server)
 - run apps
 - managed my master
+
+* [[https://kubernetes.io/docs/concepts/overview/components][kubernetes components]]
+** master components
+*** kube-apiserver
+- exposes the kubernetes api
+- front-end for kubernetes control plane
+
+*** etcd
+- key-value store: storeage for all cluster data
+
+*** kube-scheduler
+- watches newly created pods
+- assigns nodes to them
+
+*** kube-controller-manager
+- runs controller(control loop: watches the state of the cluster, works to move current state to desired state)
+- each controller: separate process, single binary, runs as signle process
+- node controller: notice and responds when nodes go down
+- replication controller: maintains the correct number of pods
+- endpoints controller: populates the endpoints objects(joins services and pods)
+- service account and token controller: create accounts and api access tokens for new namespace
+
+*** cloud controller manager
+- runs controller that interacts with underlying cloud providers
+- controllers:
+- node controllers: checks the cloud provider to determine if a node has been deleted
+- router controllers: sets up routes in underlying cloud infra
+- service controller: create/update/delete cloud provider node balancer
+- volume controller: attach/mount/interacts with cloud provider volumes
+
+** node components
+- runs on every nodes
+- maintains running pods
+
+*** kubelet
+- makes sure that containers are running in a pod
+- pods are running and healthy
+- doesn't manage containers
+
+*** kube-proxy
+*** container runtime
+* [[https://kubernetes.io/docs/concepts/overview/kubernetes-api/][kubernetes api]]
+* [[https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/][working with kubernetes objects]]
+** overview
+- persistent entities in the kubernetes system
+- kubernetes uses these entities to represent state of the cluster
+  - what apps are running, on which nodes
+  - resources available to the apps
+  - policies around how those apps behave(restart policies, upgrade, fault-tolerance)
+- once objects are created, kubernetes works to ensure that objects remain exist
+
+*** object spec and status
+ - every object includes two nested object fields that govern the object's configuration: object spec and object status
+ - object spec
+   - one must provide
+   - describes desired state for the object
+ - object status
+   - actual state of the object
+   - supplied and updated by kubernetes
+   - kubernetes control plane manages objects actual state to match desired state
+** names
+** namespaces
+- kubernetes supports multiple vertical clusters backed by same physical server
+- these virtual clusters are namespaces
+
+*** when to use multiple namespaces
+- many users spread across multiple teams/projects
+- divide cluster resources between multiple users
+
+*** viewing namespaces
+#+BEGIN_SRC shebang
+$ kubectl get namespaces
+NAME          STATUS    AGE
+default       Active    1d
+kube-system   Active    1d
+kube-public   Active    1d
+#+END_SRC
+
+- three initial namespaces
+  - default: default namespaces
+  - kube-system: namespace for objects created by kubernetes system
+  - kube-public: readable by all users
+  - 
+** labels and selectors
+*** labels
+- key-value pairs that are attached to an object
+- identify attributes of an object that are meaningful to users
+- organize and select subset of objects
+- labels can be attached on creation/modified later
+- 
+
+*** selectors
+- many objects  have same lables
+- user can identify a set of objects via label selector
+- empty label selector selects every object
+- null label selector selects no object
+- two types of selectors: equality based, set based
+  - equality based: filter by keys and values
+#+BEGIN_SRC yaml
+apiVersion: v1
+kind: pod
+metadata:
+  name: cuda-test
+spec:
+  containers:
+  - name: cuda-test
+    image: "k8s.gcr.io/cuda-vector-add:v0.1"
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+  nodeSelector:
+    accelerator: nvidia-tesla-p100
+#+END_SRC
+  - set based: allows filtering keys according to a set of values
+#+BEGIN_SRC
+environment in (production, qa)
+tier notin (frontend, backend)
+partion
+!partition
+#+END_SRC
+
+*** watch and list filtering
+#+BEGIN_SRC shellbang
+kubectl get pods -l environment=production,tier=frontend
+kubectl get pods -l 'environment in (production), tier in(frontend)'
+kubectl get pods -l 'environment in (production, qa)'
+kubectl get pods -l 'environment,environment notin (frontend)'
+#+END_SRC
+
+#+BEGIN_SRC yaml
+selector:
+  matchLabels:
+    component: redis
+  matchExpressions:
+    - {key: tier, operator: In, values: [cache]}
+    - {key: environment, operator: NotIn, values: [dev]}
+#+END_SRC
+** annotations
+- non-identifying metadata
+- one can use either label or annotation
+- labels are used to select and find collection of objects that satisfy certain conditions
+- annotations are not used to identify and select objects
+- build, release, image information like timestamp, git branch, pr number, hash
+
+** field selector
+- select kubernetes objects based on value of one or more resource fields
+$ kubectl get pods --field-sellector status.phase=Running
+* [[https://kubernetes.io/docs/concepts/overview/object-management-kubectl/overview/][kubernetes object management]]
+* kubernetes architecture 
+** nodes
+- worker machines
+- vm/physical machine
+- managed by master
+- runs containers
+- includes
+  - container runtime
+  - kubelet
+  - kubeproxy
+  
+
+*** node controller
+    DEADLINE: <2018-11-30 Fri>
+- master component
+- manages various aspects of nodes
+- assigns CIDR block
+- update list of nodes
+- when node becomes unhealthy, it asks the cloud provider if it is still available, if not deletes it from list of nodes
+- monitor nodes' health
+
+
+- TODO : finish docker
