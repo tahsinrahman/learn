@@ -211,13 +211,179 @@ $ kubectl get pods --field-sellector status.phase=Running
   
 
 *** node controller
-    DEADLINE: <2018-11-30 Fri>
 - master component
 - manages various aspects of nodes
 - assigns CIDR block
 - update list of nodes
-- when node becomes unhealthy, it asks the cloud provider if it is still available, if not deletes it from list of nodes
 - monitor nodes' health
+- when node becomes unhealthy, it asks the cloud provider if it is still available, if not deletes it from list of nodes
+
+** master-node communication
+*** cluster to master
+- communication path terminate at apiserver(other master components are not exposed)
+- apiserver listens at HTTPS 443 port
+- nodes contain public root certificate of the cluster
+- when pods are created, 
+
+*** master to cluster
+**** apiserver to kubelet
+used for:
+- fetching logs for pods
+- attaching to running pods
+- providing kubelet's port-forwarding functionality
+- 
+
+**** apiserver to nodes/pods/services
+- HTTP connection
+- not authenticated/encrypted
+- not confurrently safe
+** cloud controller manager
+- design based on plugin mechanism
+- allows cloud providers integrate with kubernetes using plugins
+- 
+
+*** without cloud controller manager
+#+DOWNLOADED: /tmp/screenshot.png @ 2018-11-30 12:53:16
+[[file:kubernetes%20architecture/screenshot_2018-11-30_12-53-16.png]]
+
+*** with cloud controller manager
+  
+#+DOWNLOADED: /tmp/screenshot.png @ 2018-11-30 12:47:37
+[[file:kubernetes%20architecture/screenshot_2018-11-30_12-47-37.png]]
 
 
-- TODO : finish docker
+
+*** cloud controller manager runs:
+- node controller
+- router controller
+- service controller
+- persistent volume label controller
+**** node controller
+- initialize a node with cloud specific zone/region label
+- initialize a node with cloud specifi detail, type and size
+- obtain node's network adress and hotname
+- check if node is deleted from cloud, if yes then delete the kubernetes node object
+**** route  controllers
+- configures routes so containers on different nodes in the cluster can communicate with each other
+- only applicable for GCE clusters
+**** service controller
+- listens to service create, update, delete events
+- configures cloud load balancers
+- 
+
+**** persistent volume labels controller
+- applies labels on volumes when crated
+- removes the need of users manually set the labels
+- these labels are essential for scheduling pods, as they only work within the region/zone that they are in, so pods need to be in same region
+- 
+
+** kubelet
+- node controller contains cloud dependent functionality of the kubelet
+- before, kubelet was responsible for cloud-specific details(ip address, region/zone labels, instant type information)
+- now, the initialization operations are done in ccm
+- now, kubelet initialize a node without cloud specific information
+- new nodes are unschedulable until ccm initializes the node with cloud specific informations
+* [[https://kubernetes.io/docs/concepts/containers/][containers]]
+* [[https://kubernetes.io/docs/concepts/workloads/pods/][pods]]
+** overview
+*** understanding pods
+**** overview
+- smallest deployable object
+- basic building block
+- smallest and simplest unit
+- represents a running process
+- pods encapsulate
+  - application containers(or multiple containers)
+  - storage
+  - unique ip
+  - options that govern how the containner(s) should run
+- containers are tightly coupled and share resource
+- single instance of an application
+  - if scaled horizontally, multiple pods, one for each instance
+  - replicated pods created and managed by controller
+
+**** pods that run single containers
+- most common use case
+- pod as a wrapper around single container
+- kubernetes manages pod rather than conntainers directly
+ 
+**** pods that run multiple containers
+- encapsulate an application that composed of multiple co-located containers that are tightly coupled and need to share resource
+- form a single cohesive unit of service
+
+**** how pods manage multiple containers
+- multiple cooperating processes as containers form a cohesive unit of service
+- containers are automatically co-located and co-scheduled on same node
+- share resource, dependencies
+- communicate with each other
+- coordinate when and how to terminate
+- advanced use case
+- only use when containers are tightly coupled
+
+**** shared networking
+- each pod is assigned a unique ip address
+- every container in a pod shares the network namespace including ip addresses and ports
+- containers can communicate with each other using *localhost*
+
+**** shared storage
+- pod specify a set of shared storage volumes
+- all containers can access the shared volumes
+- allows persistent data in a pod
+*** working with pods
+- you'll rarely create individual pods directly
+  - pods are designed as relatively short lived, disposable entities
+  - when created, it is scheduled to run on a node
+  - remains on that node until process terminates, then pod is deleted
+  - do not self-heal
+  - pods get deleted
+    - if node fails
+    - scheduling operations fails
+    - lack of resource
+    - node maintainance
+- controller handles the work managing the disposable pod instances
+- so, it is far more common to manage pods using a controller
+*** pods and controllers
+- create and manage multiple pods
+- handles replication, rollout and self healing capabilities
+- if node fails, controller might automatically replace the pod by scheduling an identical replacement on different node
+- example of controllers that contain one or more pors
+  - deployment
+  - statefulset
+  - daemonset
+*** pod template
+- pod specifications which are included in other objects such as replication controller, jobs, daemonset
+- uses pod templates to make actual pods
+
+#+BEGIN_SRC yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+    - name: myapp-container
+      image: busybox
+      command: ['sh', '-c', 'echo hello kubernetes! && sleep 3600']
+#+END_SRC
+
+- after creation, pods can't be updated
+- new template has no direct effect on pods already created
+- but pods created by controllers can be updated directly
+** pods
+- pods are isolated by linux namespaces, cgroups
+- within pod, individual containers are furher sub-isolationed
+- containers within a pod share an ip addresses and port space
+- find each other via localhost
+- communicate with each other using standard inter process communications like semaphores or shared memory
+- containers in different pods have different ip addresses
+- can't communicate by IPC
+- they communicate via pod ip address
+- 
+
+** termination of pods
+- pods are gracefully terminated
+- when users request deleteion of pod, system records the intended grace period and TERM signal is sent to main process of each container
+- once grace period has expired, the KILL signal is send to those processes
+- pods are then deleted from API server
