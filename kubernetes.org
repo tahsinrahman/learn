@@ -288,73 +288,73 @@ used for:
 ** overview
 *** understanding pods
 **** overview
-- smallest deployable object
-- basic building block
-- smallest and simplest unit
-- represents a running process
-- pods encapsulate
-  - application containers(or multiple containers)
-  - storage
-  - unique ip
-  - options that govern how the containner(s) should run
-- containers are tightly coupled and share resource
-- single instance of an application
-  - if scaled horizontally, multiple pods, one for each instance
-  - replicated pods created and managed by controller
+     - smallest deployable object
+     - basic building block
+     - smallest and simplest unit
+     - represents a running process
+     - pods encapsulate
+       - application containers(or multiple containers)
+       - storage
+       - unique ip
+       - options that govern how the containner(s) should run
+     - containers are tightly coupled and share resource
+     - single instance of an application
+       - if scaled horizontally, multiple pods, one for each instance
+       - replicated pods created and managed by controller
 
 **** pods that run single containers
-- most common use case
-- pod as a wrapper around single container
-- kubernetes manages pod rather than conntainers directly
- 
+     - most common use case
+     - pod as a wrapper around single container
+     - kubernetes manages pod rather than conntainers directly
+
 **** pods that run multiple containers
-- encapsulate an application that composed of multiple co-located containers that are tightly coupled and need to share resource
-- form a single cohesive unit of service
+     - encapsulate an application that composed of multiple co-located containers that are tightly coupled and need to share resource
+     - form a single cohesive unit of service
 
 **** how pods manage multiple containers
-- multiple cooperating processes as containers form a cohesive unit of service
-- containers are automatically co-located and co-scheduled on same node
-- share resource, dependencies
-- communicate with each other
-- coordinate when and how to terminate
-- advanced use case
-- only use when containers are tightly coupled
+     - multiple cooperating processes as containers form a cohesive unit of service
+     - containers are automatically co-located and co-scheduled on same node
+     - share resource, dependencies
+     - communicate with each other
+     - coordinate when and how to terminate
+     - advanced use case
+     - only use when containers are tightly coupled
 
 **** shared networking
-- each pod is assigned a unique ip address
-- every container in a pod shares the network namespace including ip addresses and ports
-- containers can communicate with each other using *localhost*
+     - each pod is assigned a unique ip address
+     - every container in a pod shares the network namespace including ip addresses and ports
+     - containers can communicate with each other using *localhost*
 
 **** shared storage
-- pod specify a set of shared storage volumes
-- all containers can access the shared volumes
-- allows persistent data in a pod
+     - pod specify a set of shared storage volumes
+     - all containers can access the shared volumes
+     - allows persistent data in a pod
 *** working with pods
-- you'll rarely create individual pods directly
-  - pods are designed as relatively short lived, disposable entities
-  - when created, it is scheduled to run on a node
-  - remains on that node until process terminates, then pod is deleted
-  - do not self-heal
-  - pods get deleted
-    - if node fails
-    - scheduling operations fails
-    - lack of resource
-    - node maintainance
-- controller handles the work managing the disposable pod instances
-- so, it is far more common to manage pods using a controller
+    - you'll rarely create individual pods directly
+      - pods are designed as relatively short lived, disposable entities
+      - when created, it is scheduled to run on a node
+      - remains on that node until process terminates, then pod is deleted
+      - do not self-heal
+      - pods get deleted
+        - if node fails
+        - scheduling operations fails
+        - lack of resource
+        - node maintainance
+    - controller handles the work managing the disposable pod instances
+    - so, it is far more common to manage pods using a controller
 *** pods and controllers
-- create and manage multiple pods
-- handles replication, rollout and self healing capabilities
-- if node fails, controller might automatically replace the pod by scheduling an identical replacement on different node
-- example of controllers that contain one or more pors
-  - deployment
-  - statefulset
-  - daemonset
+    - create and manage multiple pods
+    - handles replication, rollout and self healing capabilities
+    - if node fails, controller might automatically replace the pod by scheduling an identical replacement on different node
+    - example of controllers that contain one or more pors
+      - deployment
+      - statefulset
+      - daemonset
 *** pod template
-- pod specifications which are included in other objects such as replication controller, jobs, daemonset
-- uses pod templates to make actual pods
+    - pod specifications which are included in other objects such as replication controller, jobs, daemonset
+    - uses pod templates to make actual pods
 
-#+BEGIN_SRC yaml
+    #+BEGIN_SRC yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -366,24 +366,121 @@ spec:
     - name: myapp-container
       image: busybox
       command: ['sh', '-c', 'echo hello kubernetes! && sleep 3600']
-#+END_SRC
+    #+END_SRC
 
-- after creation, pods can't be updated
-- new template has no direct effect on pods already created
-- but pods created by controllers can be updated directly
+    - after creation, pods can't be updated
+    - new template has no direct effect on pods already created
+    - but pods created by controllers can be updated directly
 ** pods
-- pods are isolated by linux namespaces, cgroups
-- within pod, individual containers are furher sub-isolationed
-- containers within a pod share an ip addresses and port space
-- find each other via localhost
-- communicate with each other using standard inter process communications like semaphores or shared memory
-- containers in different pods have different ip addresses
-- can't communicate by IPC
-- they communicate via pod ip address
-- 
+   - pods are isolated by linux namespaces, cgroups
+   - within pod, individual containers are furher sub-isolationed
+   - containers within a pod share an ip addresses and port space
+   - find each other via localhost
+   - communicate with each other using standard inter process communications like semaphores or shared memory
+   - containers in different pods have different ip addresses
+   - can't communicate by IPC
+   - they communicate via pod ip address
+   - 
 
 ** termination of pods
-- pods are gracefully terminated
-- when users request deleteion of pod, system records the intended grace period and TERM signal is sent to main process of each container
-- once grace period has expired, the KILL signal is send to those processes
-- pods are then deleted from API server
+   - pods are gracefully terminated
+   - when users request deleteion of pod, system records the intended grace period and TERM signal is sent to main process of each container
+   - once grace period has expired, the KILL signal is send to those processes
+   - pods are then deleted from API server
+** container probes
+- probe is a diagnostic performed periodically by kubelet
+- kubelet calls a handler implemented by the container
+- 3 types of handlers
+  - runs specific command inside the container. diagnostic is successful if command exists with status code 0
+  - performs TCP check against container's IP on spefcified port. diagnostic successful if port is open
+  - performs HTTP GET request against container's IP address on specified port and path. Diagnostic successful if response code betwen [200, 400)
+- optionally performs two types of probles
+  - livenessProbe:
+    - indicates whether the container is running
+    - if fails, kubelet kills the container
+    - container is then subjected to its restart policy
+    - if container does not provide a liveness probe, default state is success
+  - readinessProbe:
+    - indicates whether the container is ready to service requests
+    - if fails, the endpoint controller removes pod's ip address from all services that match the pod
+    - if container does not provide a readinessProbe, default state is success
+    
+*** when to use probes
+- if container crashes on its own whenever it encounters an issue or becomes unhealty, no need for liveness probe
+- if you want to send traffic to pod when a probe succeds, specify readiness probe
+- the pod will start without recieving any traffic, only start recieiving after probe starts succeeding
+- if container needs to load large data, configuring files, specify readiness probe
+** init containers
+** pod presets
+*** overview
+- inject additional runtime requirements into a pod at creation time
+- use label selectors to specify the pods to which the preset applies
+- allows not to have explicitly provide all information for every pod
+- authors of pod templates consuming a specific service do not need to konow all the details of that service
+
+*** how it works
+- admission controller(PodPreset) which when enabled, applies pod presets to incoming pod creation request
+- when pod creation request occures, system does
+  - retrieve all PodPrestets
+  - checks if label selectors of any PodPreset matches the labels of the pod
+  - attempts to merge various resources defined by podpreset
+  - on error, through event, and create the pod without injecting any resource from podpreset
+  - annotate the the resulting modified pod spec to indicate that it has been modified by podpreset
+- when podpreset applies to one or more pods
+  - modifies the pod specs
+  - for Env EnvFrom VolumeMounts, modifies the container spec for all containers
+  - for Volume, modifies the pod spec
+** discuptons
+
+* [[https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/][replica set]]
+- next generation replication controller
+- only difference between replicaset and replication controller is selector support
+- replicaset supppports the new set based selector
+- replication controller only supports equality based selector
+
+
+** how to use replicaset
+- most kubectl commands that supports replication controller also supports replicasets
+- only exception is rolling-update command
+- for rolling update functionality, one should use deployments instead
+- replicasets can be used independently
+- mainly used by deployments
+
+
+** when to use replicaset
+- replicaset ensures that spcified number of pod replicas are running at any given time
+- we should use deployments instead of directly using replicasets
+* [[https://kubernetes.io/docs/concepts/workloads/controllers/replicationcontroller/][replicationcontroller]]
+- ensures that specified number of pod replicas are running at any one time
+- makes sure that pods are always up and available
+
+** how replicationcontroller works
+- if too many pods, terminates extra pods
+- if too few pods, creates more pods
+- pods managed by replicationcontroller are automatically replaced if they fail, deleted or terminated
+* [[https://kubernetes.io/docs/concepts/workloads/controllers/deployment/][deployments]]
+- controller that provides declarative udpates for pods and replicasets
+- you describe a desired state in deployment, and deployment controller changes tha actual state to the desired 
+* [[https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/][statefulset]]
+- used to manage stateful applications
+- manages the deployment and scaling of a set of pods
+- provides gurantee about ordering and uniquness of these pods
+- like deployment, manages pods that are based on an identical container spec
+- unlike deployments, maintains a sticky identity for each of their pods
+- these pods are of same specs, but are not interchangeable
+- each has a persistent identifier
+- that is maintained across any rescheduling
+
+
+** using statefulsets
+- stable unique network identifier
+- stable, persistent storage
+- ordered, graceful deployment and scaling
+- ordered, automated rolling updates
+- if application doesn't require any stable identifiers or ordered deployment, deletion or scaling, you should deploy it with deployments
+
+** limitaions
+- deleting/scaling down doesn't delete the volumes associated with the stateful
+- it is because of data safety
+- do not guarantee on the termination of pods when statefulset is deleted
+- to achive ordered and graceful termination of the pods, it is possible ot scale down to 0 prior to deletion
