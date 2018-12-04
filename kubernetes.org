@@ -484,3 +484,11 @@ spec:
 - it is because of data safety
 - do not guarantee on the termination of pods when statefulset is deleted
 - to achive ordered and graceful termination of the pods, it is possible ot scale down to 0 prior to deletion
+* [[https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/][daemonset]]
+- ensures that all of some nodes run a copy of a pod
+- as nodes are added, pods are added to them
+- as nodes are deleted, pods are deleted
+** use cases
+- running cluster storage daemon
+- running log collection daemon
+- running node monitoring daemon on every node
