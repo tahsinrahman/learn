@@ -492,3 +492,216 @@ spec:
 - running cluster storage daemon
 - running log collection daemon
 - running node monitoring daemon on every node
+* [[https://kubernetes.io/docs/concepts/services-networking/service/][services]]
+** overview
+- pods are mortal
+- pods get own ip, but they can't be relied upon to be stable over time
+- if some st of pods(backend) provides functionality to other pods(frontend), how do those frontends find out and keep track of which backends are in that set
+- service: defines a logical set of pods and a policy by which to access them
+- the set of pods targeted by a service is determined by a label selector
+- image processing backend with three replicas
+- frontend do not care which backend they use
+- backend pods can change, but frontend clients should not be aware of them
+- for kubernetes native apps, kubernetws offers endpoints api that is updated whenever the set of pod in a service change
+- for non native apps, kubernets offers virtual ip based bridge to services which redirects to the backend pods
+
+** defining a service
+#+BEGIN_SRC yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: MyApp
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 9376
+#+END_SRC
+- it'll create a service named ~my-service~
+- it targets 9376 on any pod with ~app=myapp~ label
+- service will have an IP (clusterIP)
+- maps incoming port to any targetPort
+- by default, targetPort is same as port
+- targetPort can be string, the name of a port in the pods
+- so you can change the port number that pod exposes without breaking service
+
+- kube-proxy watches the kubernets master for addition and removal of service
+- for each service, it opens a port(randomly chosen) on local node
+- any connecton to this(proxy) port will be proxied to the one of service's backend pods
+- it installs iptable rules which caputre traffic to the service's clsuterIP and port
+- then redicects that traffic to the proxy port which proxies the backend pods
+** service without selectors
+- service abstracts access to pods
+- they can also abstract other bacnekds
+  - you want to point your service to a service in another namespace
+  - you are migrating your workload to kubernetes and some of your backends run outside of kubernetess
+  - you want to have external database cluster in production, but in test you use your own database
+
+#+BEGIN_SRC yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-service
+spec:
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 9376
+#+END_SRC
+- service has no selector
+- corresponding endpoints object will not be created
+- you can manually map the service to specific endpoints
+
+** headless services
+- sometimes you don't need/want loadbalanceing and single service IP
+- headless service in that case
+- "none" in clusterIP field
+- cluster IP not allocated
+- kube-proxy doesn't handle these services
+- no loadbalancing or proxying done by the platform for them
+
+*** with selectors
+- headless services with selectors, endpoints controller creates endpoints records
+- modifies the DNS configureation to recotd addresses that point directoly to the pods
+
+*** 
+
+* [[https://kubernetes.io/docs/concepts/services-networking/connect-applications-service/][connecting applications with services]]
+** overview
+- docker use host private networking
+- containers can talk to each other only if they are on the same machine
+- to commincate across nodes, there must be allocated ports on the machine's own ip address
+- they are then forwarded or proxied to the containers
+- so, containers must co-ordinate which ports they use, or ports must be allocated dynamically
+- coordinating ports is very difficult to do at scale
+- exposes users to cluster-level issues outside of their control
+- kubernetes assumes that pods can communate with other pods, regardless of which host they land on
+- every pod is given own cluster-private-ip
+- no need to explicitly create links between pods or map host ports to container ports
+- containers within a pod, can reach each other's ports on localhost
+- all opds in a cluster can see each other wihtout NAT
+
+** exposing pods to cluster
+#+BEGIN_SRC yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+spec:
+  selector:
+    matchLabels:
+      run: my-nginx
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        run: my-nginx
+    spec:
+      containers:
+      - name: my-nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+#+END_SRC
+
+#+BEGIN_SRC shellbang
+$ kubectl get pods -l run=my-nginx -o wide
+NAME                        READY   STATUS    RESTARTS   AGE   IP            NODE
+my-nginx-77f56b88c8-cj2fr   1/1     Running   0          14s   172.17.0.20   node-1
+my-nginx-77f56b88c8-ptt8t   1/1     Running   0          14s   172.17.0.19   node-2
+#+END_SRC
+
+- can ssh into any node and curl both IPs
+- kubectl exec into any pod and curl into both IPs
+
+** creating service
+- when node dies, pod dies with it, deployment creates new pods with different IPs
+- this is the problem that servicce solves
+- service defines a logical set of pods that all provide same functionality
+- when created, each service is assigned a unique IP address(clusterIP)
+- this is tied to the lifespan of the service, will not change while service is alive
+- pods can be configured to talk to the service
+- communication to the service will be automatically load-balanced out to some opd that is a member of the service
+
+#+BEGIN_SRC yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-nginx
+  labels:
+    run: my-nginx
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    containerPort: 80
+  selector:
+    run: my-nginx
+#+END_SRC
+
+- it'll create a service which targets TCP port 80 on any pod with the  ~run: my-nginx~ label
+- targetPort: the port the container accepts traffic on
+- port: the service port, which can be any port that other pods use to access the service
+- you can curl the nginx service on ~<CLUSTER_IP>:<PORT>~ from any node/pod
+
+
+
+
+
+- a service is backed by a group of pods
+- these pods are exposed through endpoints
+- when pod dies, it is automaticall yremoved from the endpoints
+- new pods matching service's selector will be automatically added to endpoints
+
+#+BEGIN_SRC shellbang
+$ kubectl get pods -l run=my-nginx -o wide
+NAME                        READY   STATUS    RESTARTS   AGE   IP            NODE
+my-nginx-77f56b88c8-cqqsg   1/1     Running   0          1h    172.17.0.19   minikube
+my-nginx-77f56b88c8-v22kz   1/1     Running   0          1h    172.17.0.20   minikube
+
+$ kubectl get endpoints my-service
+NAME         ENDPOINTS                       AGE
+my-service   172.17.0.19:80,172.17.0.20:80   1h
+#+END_SRC
+
+** accessing service
+two primary modes for finding service
+- environment variable (works out of the box)
+- DNS (requires CoreDNS addon)
+
+
+*** environment variable
+- when pod runs on a node, kubelet adds a set of env vars for each active service
+- this introduces an ordering probelm
+- when you create replicas before the service, pods dont get Env Vars
+- scheduler might put both pods on the same machine
+- it'll take entire service down if it dies
+
+*** DNS
+- DNS  addon service, that automatically assigns dns names to other services
+
+#+BEGIN_SRC shellbang
+$ nslookup my-service
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      my-service
+Address 1: 10.98.77.126 my-service.default.svc.cluster.local
+#+END_SRC
+
+** securing the service
+- before exposing the service to the internet, you want to make sure the communication channel is secured
+- we need
+  - self signed certificates for https
+  - an nginx server configured to use the certificates
+  - a secret that makes the certificates accessible to pods
+
+** exposing the service
+- some poarts of app may need to expose a service onto an exterman IP
+- two ways of doing this
+  - nodeport
+  - loadbalancer
+
+
