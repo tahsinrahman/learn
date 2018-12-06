@@ -566,7 +566,84 @@ spec:
 - headless services with selectors, endpoints controller creates endpoints records
 - modifies the DNS configureation to recotd addresses that point directoly to the pods
 
-*** 
+*** without selectors
+- endpoint controller don't create endponts records
+
+** publishing services:  service types
+- ClusterIP
+- NodePort
+- LoadBalancer
+- ExternalName
+
+*** ClusterIP
+- exposes service on cluster-internal IP
+- service only reachable from within the cluster
+- default service type
+
+*** NodePort
+- exposes service on each node's ip at a specific port
+- a clusterIP service, to which the nodeport service will route, is automatically created
+- you can contact nodeport service from outside of the cluster, <NODE_IP>:<NODE_PORT>
+
+*** LoadBalancer
+- exposes service externally using cloud provider's load balancer
+- nodeport and clusterIP service to which external load balancer will route are automatically created
+- for cloud providers that support external load balancers, it'll provision a load balancer for your service
+- traffic from external load balancer will be directed at the backend pods
+
+*** ExternalName
+- maps the service to the contents of the externalName field
+- no proxying of any kind is set up
+- maps a service to a DNS name
+
+#+BEGIN_SRC yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-service
+  namespace: prod
+spec:
+  type: ExternalName
+  externalName: my.database.example.com
+#+END_SRC
+
+- when looking up the host =my-service.prod.svc.cluster.local= dns service will return =my.database.example.com=
+- redirection happens in DNS label rather than proxying or forwarding
+
+* [[https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/][DNS for services and pods]]
+** overview
+- kubernets schedules DNS pod and service on the cluster
+- configures the kubelet to tell containers to use the DNS service's IP to resolve DNS names
+- every service is assigned a DNS name
+- service name =foo= in namespace =bar=
+- pod running in namespace =bar= can look up this service by =foo=
+- pod running in namespace =xyz= can look up by =foo.bar=
+
+** services
+*** A record
+- normal (not headless) services are assigned a DNS A record of the form =my-svc.my-namespace.svc.cluster.local=
+- this resolves to the clusterIP of the service
+- headless services are also assigned DNS A record of the form =my-svc.my-namespace.svc.cluster.local=
+- this resolves to the set of IPs of the pods selected by the service
+
+*** SRV record
+- SRV records are created for named ports that are part of normal/headless service
+- for named port, =_my-port-name._my-port-protocol.my-svc.my-namespace.svc.cluster.local=
+- this resolves to =my-svc.my-namespace.svc.cluster.local=
+- for headless service, this resolves to a set of IPs of the pod
+- contains the port number and the domain name of the pod =auto-generated-name.my-svc.my-namespace.svc.cluster.local=
+
+** pods
+*** A record
+- pods are assigned DNS A record =pod-ip-address.my-namespace.pod.cluster.local=
+- pod ip =1.2.3.4= in namespace =default=, dns =1-2-3-4.default.pod.cluster.local=
+
+*** pod's hostname and subdomain fields
+- when pods are created, hostname is =metadata.name=
+- optional =hostname= field
+- when specified, takes precedence over pod's name to be the hostname
+- also have =subdomain= field
+- pos with =nostname:foo= and =subdomain:bar= in namespace =my-namespace=, DNS =foo.bar.my-namespace.svc.cluser.local=
 
 * [[https://kubernetes.io/docs/concepts/services-networking/connect-applications-service/][connecting applications with services]]
 ** overview
@@ -647,9 +724,6 @@ spec:
 - you can curl the nginx service on ~<CLUSTER_IP>:<PORT>~ from any node/pod
 
 
-
-
-
 - a service is backed by a group of pods
 - these pods are exposed through endpoints
 - when pod dies, it is automaticall yremoved from the endpoints
@@ -703,5 +777,85 @@ Address 1: 10.98.77.126 my-service.default.svc.cluster.local
 - two ways of doing this
   - nodeport
   - loadbalancer
+* [[https://kubernetes.io/docs/concepts/services-networking/ingress/][ingress]]
+** overview
+- manages external access to services, typically HTTP
+- can provide load balancing, SSL termination, name-based virtual hosting
+** terminology
+*** node:
+single virtual/physical machine in cluster
+*** cluster
+- a group of nodes firewalled from the internet
+- primary compute resource managed by kubernetes
+*** edge router
+- router that enforces the firewall policy
+- could be gateway managed by cloud provider or physical hardware
+*** cluster network
+- a set of links, logical or physical that facilitate communication within cluster
+*** service
+- identifies a set of pods using label selector
+- services are assumed to have virtual IP only orutable within the cluster
+  
+** ingress
+- exposes HTTP and HTTPS routes from outside the cluster to services within the clluster
+- traffing routing is controlled by ingress
 
+#+BEGIN_SRC
+ internet
+    |
+ ingress
+    |
+  -------
+[services]
+#+END_SRC
 
+- ingress can be configured to give services
+  - externally-reachable URLs
+  - loadbalance traffic
+  - terminate SSL
+  - offer name based virtual hosting
+- doesn't expose arbitrary ports or protocol
+- exposing services other than HTTP and HTTPS to internet typically uses a service of type nodeport/loadbalancer
+** ingress controller
+** ingress rules
+- each http rule contains the following
+  - optional host
+    - if not defined, rule applies to all inbound HTTP traffic through the IP adress specified
+    - if host is provided, rule applies to the host
+  - list of paths
+    - each path has an associataed backend servicename and serviceport
+    - both the host and path must match the incoming request before loadbalancer direct traffic to the referenced service
+  - backend
+    - combination of service and port name
+    - default backend is used if request don't match the path in the spec
+
+#+BEGIN_SRC yaml
+apiVersion:
+kind:
+metadata:
+spec:
+  backend:
+  tls: []               #tls configs for all the hosts mentioned in the rule
+  - hosts: []
+  - secretName:
+  rules:                # define all the rules
+  - host:               #define the host
+    http:
+      paths:            #define all the paths for the given host
+      - path:
+        backend:        #define the servicename and port where traffice will be directed
+          serviceName:
+          servicePort:
+#+END_SRC
+
+** ingress types
+*** single service ingress
+- expose a single service
+- can also be done using default backend with no rules
+
+* [[https://kubernetes.io/docs/concepts/services-networking/network-policies/][network policies]]
+- specificaiton about how groups of pods are allowed to communicate with each other and other network endpoints
+- use labels to select pods and define reules which specify what traffic is allowd to the selected pods
+- by default pods are non isolated, accept traffic from any source
+- becomes isolated by having a network policy that selects them
+- then the pod will reject nay connection that are not allowed by the policy
