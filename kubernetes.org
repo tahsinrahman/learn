@@ -859,3 +859,97 @@ spec:
 - by default pods are non isolated, accept traffic from any source
 - becomes isolated by having a network policy that selects them
 - then the pod will reject nay connection that are not allowed by the policy
+* [[https://kubernetes.io/docs/concepts/storage/volumes/][volumes]]
+** overview
+- files in container are ephemeral
+- when container crashes, kubelet will restart it, container will start with a clean state, files will be lost
+- running containers together in a pod often needs to share files between them
+- kubernetes volumes solves these problems
+** background
+- kubernetes volumes has explicit lifetime, same as pod that encloses it
+- volume outlives any container that run within the piod
+- data is preserved across container restart
+- kubernetes supports many type of volumes
+- pod can use any number of them simultaneously
+- volume is just a directory with some files in it, which is accessable from the containers in a pod
+- how that directory comes to be, the medium that backs it, contenets of it are determined by the volume type
+- to use a volume, pods specify =.spec.volume= and where to mount that volume into container =.spec.containers.volumeMounts=
+- 
+* [[https://kubernetes.io/docs/concepts/storage/persistent-volumes/][persistent volume]]
+** overview
+- persistentvolume provides an api that abatracts details of how storage is proided from how it is consumed
+- two api resources
+  - persistentVolume
+  - persistentVolumeClaim
+  
+** persistentVolume
+- storage that has been provisioned by an admin
+- it is a resource in the cluster like a node is a cluster resource
+- lifecycle independent of any individual pods
+
+** persistentVolumeClaim
+- request for storage by user
+- similar to pods
+- pods consume node resources
+- pvc consume pv resource
+- pods can request resources (cpu and memory)
+- pvc can request specific size and access mode
+** lifecycle of volume and claim
+- pvs are resoruces in the cluster
+- pvcs are requests for those resources
+  
+*** provisioning
+**** static
+- cluster admin creates number of pvs
+- they carry the details of the real storage
+
+**** dynamic
+- none of the static pvs the admin created matches users =PersistentVolumeClaim=
+- cluster may try to dynamically provision a volume specially for that pvc
+- this is based on storageclass
+- pvc may request storageclass
+- admin must have created and configured that class
+- to enable dynamic storage provisioning, cluster admin needs to enable =DefaultStorageClass=
+** binding
+- a user creates/(has already created for dynamic provisioning) a PersistentVolumeClaim with specific amount of storage requested and access modes
+- control loop in the master watches the new pvcs, find matching pv and binds them together
+- if pv was dynamically provisioned for new pvc, loop always bind that pv to the pvc
+- otherwise user will always get at least what they asked for
+- the volume may excess of what was requested
+- once bound, PersistentVolumeClaim binds are exclusive
+- pvc to pv binding is one-to-one mapping
+- claims will remain unbound if matching volume doesn't exist
+- claim will bound as matching volumes become available
+- cluster provisioned with many 50Gi pvs would not match a pvc requesting 100Gi
+
+** using
+- pods use claims as volume
+- cluster inspects the claim to find the bound volume
+- then mounts the volume in the piod
+- for volume supporting multiple access modes, user defines which mode is desired when using the claim
+- once user has a claim and claim is bound, the bound pv belongs to the user as long as they need it
+
+** storage object in use protection
+- purpose of storage objecct in use protection is to ensure that pvc in active use by pod and pv that are bound to pvc are not removed from the system as they might result in data loss
+- when is enabled, if user deletes a pvc in active use by pd, pvc is not removed immediately
+- removal is postponded until the pvc is no longer actively used by any pods
+- if admin deletes a pv that is bound to a pvc, the pv is not removed immediately
+- pv removal postponded until pv is not bound to the pvc any more
+
+** reclaiming
+- when user is done with volume, they can delete the pvc
+- this allows reclaiming of the resource
+
+*** retain
+- manual reclamation of the resource
+- when pvc is deleted, pv still exists
+- volume is considered released
+- it is not yet available for another claim because previous claiman'ts data remains on the volume
+- admin can manually reclaim the volume
+  - delete the pv, assiciated storage asset in external infra still exists after pv is deleted
+  - manually clean up data
+  - manually delete associated storage asset
+
+*** deleteion
+- removes the pv object from kubernetes, as well as the associated storage asset in the external infra
+- volumes that were dynamically provisioned inherit reclaim policy of the storageclass, defaults to delete
