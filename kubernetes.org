@@ -953,3 +953,132 @@ spec:
 *** deleteion
 - removes the pv object from kubernetes, as well as the associated storage asset in the external infra
 - volumes that were dynamically provisioned inherit reclaim policy of the storageclass, defaults to delete
+
+** wriging portable configuration
+- do include pvc object in bundle of config, alongside deployment, configmaps etc
+- do not include pv object in the config, as user may not have permissions to create pv
+* [[https://kubernetes.io/docs/concepts/configuration/overview/][configuration best practices]]
+** general tips
+- when defining configs, specify latest stable API version
+- config files should be stored in version control before pushed to cluster
+- this helps to quickly roll back
+- also allows cluster re-creation and restoration
+- write configs in YAML instead of JSON
+- group related objects into single file whenever it makes sense
+- don't specify default values unnecessary, simple minimal configuration
+- put object descriptions in annotations
+
+** naked pods vs replicasets deployments and jobs
+- don't use naked pods
+- naked poids will not be reschedules in the event of a node failure
+- deployment which both creates replicaset to ensure desired no of pods are always available, specifies a strategy to replace pods
+- is almost always preferable to create pods directly
+- except =restartPolicy: Never= scenarios
+- job is also appropriate in this case
+
+** services
+- create service before its corresponding backend workloads(deployemnt/replicasets)
+- create service before any workloads that need to access it
+- when containers is created, it provides environment variables pointing to all services that were running when the container is started
+- if service =foo= exists, all containers wil get
+#+BEGIN_SRC bash
+FOO_SERVICE_HOST=<service host>
+FOO_SERVICE_PORT=<service port>
+#+END_SRC
+- don't use these env vars
+- use dns name of the service instead
+- don't specify =hostPort= to a pod unless absolutely necessary
+- when you bind pod to =hostPort=, it limits the no of places the pod can be schedules
+- if you need to acces to the port for debugging, you can use apiservice proxy or =kubectl port-forward=
+- if you explicitly need to expose pod's port on the node, consider using =NodePort= service
+- avoid using =hostNetwork=
+- use =headless services= for easy service discovery when you don't need load balancing
+
+** using labels
+- define labels that identify semantic attributes of your appp or deployment
+- =app: myapp, tier: frontemnd, phase: test, deployment: v3=
+- a service can be made to span multiple deployments by omitting release specific labels from selector
+- makes it easy to update a running service without downtime
+- manipulate labels for debugging
+- controllers and services match to the pods using selector labels
+- removing label from a pod will stop it from being considered by a controller/from being served traffic by a service
+- if remove existing label, controller wil lcreate new pod to take its place
+- useful way to debug previouisly 'live' pod
+
+** container image
+- =imagePullPolicy: IfNotPresent= the image is pulled only if not already presetn locallay
+- =imagePullPolicy: Always= the image is pulled every time the pod is started
+- omitted if image tag is =:latest= or
+- =imagePullPolicy= omitted if image tag is presetn, but not =latest= and =IfNotPresent= applied
+- =imagePullPolicy: Never= image is assumed to exist locally. not attempt is made to pull the image
+- should never use =latest= tag
+
+** using kubectl
+- use =kubectl apply -f <dirname>= or =kubectl create -f <directory>=
+- using label selectors for =get= and =delete=
+- use =kubectl run= or =kubectl expose= to quickly create single container deployment and services
+
+* [[https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/][managing compute resources for containers]]
+- you can optinally sepcify how much cpu and meory each container needs
+- when specifyed, the scheduler can make better decisions about which node to place pods on
+
+** resource types
+- =spec.containres[].resources.limits.cpu=
+- =spec.containres[].resources.limits.memory=
+- =spec.containres[].resources.requests.cpu=
+- =spec.containres[].resources.requests.memory=
+
+** meaning of cpu
+- a vcpu
+- one cure
+- one vcore
+- one hyperthread
+- fractional requests are allowed
+- =spec.contaiers[].resources.requests.cpu: 0.5= guranteed half cpu that ask for 1 cpu
+- =0.1= means =100m=, =one hundread milicpu=, =one hundread milicore=
+- =100m= is preferred than =0.1m=, because of precisions
+- absolute quantity
+- =0.1= is same on single-core, dual-core, 48-core machine
+
+** meaning of memory
+- memory is measured in bytes
+- plain integer or fixed point integer using =E P T G M K= or =Ei Pi Ti Gi Mi Ki= suffixes
+
+** how pods with resource requests are scheduled
+- when create pod, kube scheduler selects node for the pod
+- each node has maximum capacity for each resource types
+- scheduler ensures that sum of resource requests is less than capacity of the node
+- protects agains resource shortage on a node
+
+** how pods with resource limits are run
+- passes the CPU and memory limits to docker
+- =spec.containers[].resources.requests.cpu= is converted to core value, can be fractional, and multiplied by 1024
+- used as the value of =--cpu-shares= flag of =docker run= command
+- =spec.containers[].resources.limits.cpu= is converted to milicore value, multiplied by 100
+- resulting value is total amount of cpu time container can use in 100ms time
+- =spec.containers[].limits.memory= converted to integer, used as =--memory= flag for =docker run= command
+- if container exceeds memory limit, might be terminated
+- if restartable, kubelet will restart it
+- if container exceeds memory request, it is likely that pod will be evicted whenever the node runs out of memory
+  
+** troubleshooting
+- if scheduler cna't find any node where a pod can fit, pod remains unscheduled until a place can be cound
+#+BEGIN_SRC bash
+$ kubectl describe pod frontend | grep -A 3 Events
+Events:
+  FirstSeen LastSeen   Count  From          Subobject   PathReason      Message
+  36s   5s     6      {scheduler }              FailedScheduling  Failed for reason PodExceedsFreeCPU and possibly others
+#+END_SRC
+- pod named 'frontend' failed to be scheduled due to insufficient cpu on he node
+- similar error due to insufficient memory
+- solved by, add more nodes
+- termintaing unneeded pods
+- check that pod is not larger than all the nodes
+** local ephemeral storage
+- kubelet's root directory (/var/lib/kubelet/) and log directory (/var/log/) are stored on root partion of the node
+- this partition is also shared and consumed by pods via emptyDir volumes, container logs, image layers, container writable layers
+- this partition is ephemeral
+- applications cannot expect any performance SLA from this partition
+- local ephemeral storage management only applies for root partition
+
+
