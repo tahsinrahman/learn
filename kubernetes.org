@@ -1080,5 +1080,287 @@ Events:
 - this partition is ephemeral
 - applications cannot expect any performance SLA from this partition
 - local ephemeral storage management only applies for root partition
+- each container can specify =spec.containers[].resources.limits.ephemeral-storage=, =spec.containers[].requests.ephemeral-storage=
+ 
+*** how pods with ephemeral-storage requests are scheduled
+- each node ahs a max amount of local ephemeral storage it can provide for pods
+- scheduler ensures that sum of resource requests is less than capacity
 
+*** how pods with ephemeral storage limits run
+- if containers writable layer and logs useage exceeds storage limits, pod will be eviicted
+- for pods, if sum of local ephemeral storage from all containers and pods emptyDir volumes exceeds the limit, pod will be evicted
 
+** extended resources
+* [[https://kubernetes.io/docs/concepts/configuration/assign-pod-node/][assigning pods to nodes]]
+- you can constrain a pod to be only able to run on particular nodes/prefer to run on particular nodes
+- several ways, all use label selectors
+
+** node selector
+- simplest  form
+- field of podspec
+- specifies a map of key-value pairs
+- for pods to be eligible to run on node, node must have each of the labels
+
+*** attach label to node
+#+BEGIN_SRC bash
+# get list of nodes
+$ kubectl get nodes
+# add label
+$ kubectl label nodes <node-name> <label-key>=<label-value>=
+# verify
+$ kubectl get nodes --show-labels
+#+END_SRC
+
+*** add nodeselector field to pod configuration
+#+BEGIN_SRC yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    env: test
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+  nodeSelector:
+    diskType: ssd
+#+END_SRC
+
+=$ kubectl get pods -o wide= to verify
+
+** built-in node labels
+- nodes come pre-populated with a standard set of lables
+#+BEGIN_SRC 
+kubernetes.io/hostname
+failure-domain.beta.kubernetes.io/zone
+failure-domain.beta.kubernetes.io/region
+beta.kubernetes.io/instance-type
+beta.kubernetes.io/os
+beta.kubernetes.io/arch
+#+END_SRC
+
+- cloud specific
+- not guranteed to be reliable
+
+** node isolation/restriction
+- adding labels allows targeting pods to specific nodes
+- this can be used to ensure specific pods only run on nodes with certain isolation, security or regulatory proparties
+- when using labels for this purpose, choosing label keys that can't be modified by kubelet on the node is strongly recommended
+- =NodeRestriction= admission plugin prevents kubelets from setting/modifying labels with =node-restriction.kubernetes.io/= prefix
+- ensure you are using Node Authorizer and enabled NodeRestriction Admission plugin
+- add labels under =node-restriction.kubernetes.io/= prefix
+
+** affinity and anti-affinity
+- nodeSelector provides simple way to constrain pods to nodes with particular labels
+- affinity, anti-affinity greately expands the types of constraints
+- language is more expressive
+- you can indicate the rul is "soft"/"preference" rather than hard requirement
+- you can constrain against labels on other pods running on the node, rather than labels on node itself
+- allows rules abour which pods can and can't be colocated
+- two types of affinity, "node affinity" and "inter-pod affinity/anti-affinity"
+- nodeselector wil be deprecated
+- node affinity can express everything that nodeSelector can express
+
+*** node affinity
+- two types of node affinity
+  - =requiredDuringSchedulingIgnoredDuringExecution=
+  - =preferredDuringSchedulingIgnoredDuringExecution=
+- hard and soft respectively
+- former specifies rules that must be met for a pod to be scheduled onto a pod
+- latter specifies pereference that the scheduler will try to enforce but will not guranttee
+- IgnoredDuringExcution means, if labels on node change on runtijme such that affinity rules on a pod are no longer met, the pod will still continue to run on the node
+- if specify both =nodeSelector= and =nodeAffinity= both must be satisfied to be scheduled
+- if specify multiple =nodeSelectorTerms= associated with =nodeAffinity=, podd can be schedules if one of the =nodeSelectorTerms= is satisfied
+- if specify multiple =matchExpressions= associated with =nodeSelectorTerms=, pod can be scheduled if all of =matchExpressions= is satiscied
+- if remove/change the label node after pod is scheduled, pods won't be removed
+- affinity selecton works only at the tiem of scheduling the pod
+- =weight= in =preferredDuringSchedulingIgnoredDuringExecution= is in range 1-100
+- for all node that meets the scheduling requirements, scheduler will compute a sum of weights
+- this score is then combined with scores of other priority function of the node
+- node with highest total scoore are most preferred
+** pod affinity and anti-affinity
+- allows to constrain which nodes your pd is eligible to be scheduled based on pables on pods that are already running on the node
+- this pod should run(should not run for anti) in X node if X is already running one or more pods that meet rule Y
+- Y is expressed as LabelSelector with associated list of namespaces
+- pods are namespaced, label selector over pod labels must specify which namespaces the selector should apply to
+- requires substantial amount of processing
+- can slow down scheduling in large clusters
+- not recommended for clusters larger than several hundred nodes
+
+#+BEGIN_SRC yaml
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: security
+          operator: In
+          values:
+          - S1
+      topologyKey: failure-domain.beta.kubernetes.io/zone
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: security
+            operator: In
+            values:
+            - S2
+        topologyKey: kubernetes.io/hostname
+#+END_SRC
+- the pod can be schedules onto a node only if that node is in the same zone as at least one running pod that has label security:S1
+- the pod is not prefered to be scheduled onto a node if it is already running a pod with label security:S2
+- if topopogyKey:zone, the pod can't be scheduled onto a node if that node is in the same zone as a pod with label security:S2
+
+* [[https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/][taints and tolerations]]
+- node affinity, property of pods that attracts them to a set of nodes
+- taints are opposite, allows a node to repel a set of pods
+- taints are dolerations work together to ensure pods are not scheduled onto inappropriate nodes
+- one or more taints are applied to a node
+- this marks that the node should not accept any pod that do not tolerate the taints
+- tolerations are applied to pds
+- allows the pdos to schedule onth nodes with matching taints
+
+** concepts
+- apply taint using =$ kubectl taint nodes node1 key=value:NoSchedule=
+- no pod will be able to schedule onto node1 unless it has matching toleration
+- remove taint using =$ kubectl taint nodes node1 key:Noschedule-=
+- specify a toleration for a pod in podSpec
+- will not schedule pods that doesn't tolerate these taints
+- =PreferSchedule= soft version of =NoSchedule=, system will try to avoid placing a pod that doesn't tolerate the taint, but not required
+- you can put multiple taints on same node
+- multiple tolerations on same pod
+- if there is atleast one un-ignored taint with effect NoSchedule, pod will not be scheduled on that node
+- if no un-ignored taint with effect NoSchedule, but at least on un-ignored taint with PreferNoSchedule, will try not to schedule
+- if at least on un-ignored taint with effect NoExecute, then pod will be evicted from that node and will not be scheduled later
+
+#+BEGIN_SRC bash
+$ kubectl taint nodes node1 key1=value1:NoSchedule
+$ kubectl taint nodes node1 key1=value1:NoExecute
+$ kubectl taint nodes node1 key2=value2:NoSchedule
+#+END_SRC
+
+#+BEGIN_SRC yaml
+tolerations:
+- key: "key"
+  operator: "Equal"
+  value: "value"
+  effect: "NoSchedule"
+
+tolerations:
+- key: "key"
+  operator: "Exists"
+  effect: "NoSchedule"
+#+END_SRC
+
+- the pod will not be scheduled onto the node, as no tolertion matching the third taint
+- but it will continue running if already running on the node when taint is added
+- if a taint with NoExecute is added to the node, any pods that do not tolerate the taint will be evicted immediately
+  
+** example use cases
+*** dedicated nodes
+- =$ kubectl taint nodes nodename dedicated=groupName:NoSchedule=
+- add corresponding toleration to their pods
+- they will be allowd to use the tainted(dedicated) nodes as well as other nodes in the cluster
+- if you want to dedicate the nodes to them and ensure they only use dedicated nodes, you should use additional label =dedicated=groupName=
+
+*** nodes with special hardware
+- in a cluster, small subet of nodes have speciliazed hardware
+- it is desirable to keep pods that don't need the specialized hardware out of those nodes
+- =$ kubectl taint nodes nodename special=true:NoSchedule= or =$ kubectl taitn nodes nodename spaceial=true:PreferNoSchedule=
+* [[https://kubernetes.io/docs/concepts/configuration/secret/][secret]]
+- intended to hold sensitive info - password, oauth token, ssh keys
+- secret is more safer and flexible than putting it it pod definition or docker image
+
+** overview
+- contains small amount of sensitive data
+- allows for more control over how it is used
+- reduces the risk of accidental exposeure
+- to use a secret, pod needs to reference the secret
+- can be used with a pod in two ways
+  - as file in a volume mounted on one or more containers
+  - used by kubelet when pulling image for the pod
+
+** built in secrets
+- k8s automatically create secrets which contain credentials for accessing the api
+- automatically modifies pods to use this type of secret
+
+** creating your own secret
+*** using kubectl
+** use cases
+*** pod with ssh-keys
+#+BEGIN_SRC bash
+$ kubectl create secret generic ssh-key-secret --from-file=ssh-privatekey=/path/to/.ssh/id_rsa --from-file=ssh-publickey=/path/to/.ssh/id_rsa.pub
+#+END_SRC
+
+#+BEGIN_SRC yaml
+kind: Pod
+apiVersion: v1
+metadata:
+  name: secret-test-pod
+  labels:
+    name: secret-test
+spec:
+  volumes:
+  - name: secret-volume
+    secret:
+      secretName: ssh-key-secret
+  containers:
+  - name: ssh-test-container
+    image: mySshImage
+    volumeMounts:
+    - name: secret-volume
+      readOnly: true
+      mountPath: "/etc/secret-volume"
+#+END_SRC
+** bset practices
+- when deploying apps that interact with secrets api, should use RBAC
+- watch and list requsts for all secrets in a cluster are extremely powerful capabilities
+- should be avoided
+- should be reserved for only the most privileged, system-level components
+
+** security properties
+*** protection
+- secret can be created independently of the pods that use them
+- there is less risk of secret being exposed during the workflow of creating viewing and editing pods
+- secret is only sent to a node if a pod on that node requires it
+- it is not written to disk
+- stored in tmpfs
+- deleted once the pod that depends on it is deleted
+- there may be secrets for several pods on the same node
+- only the secrets that a pod requires are potentially visible within its containers
+- one pod doesn't have access to secrets of another pod
+
+*** risks
+- in api server, secret data is stored in plaintext in etcd
+- admin should limit access to etcd to admin users
+- secret data in apiserver is at rest on disk that etcd uses
+- admins may want to wipe disks used by etcd when no longer in use
+- if configure the secret through json/yaml, which is the secret data encoded as base64, sharing this file or checking it in to a source repository compromises the secret
+- application still need to protect the value of secret after reading it from volume
+- A user who can create a pod that uses a secret can also see the value of the secret
+- if the apiserver doesn't allow user to read the secret object, user could run a pod which exposes the secret
+- if multiple replicas of etcd are run, then secrets will be shared between them
+- etcd doesn't secure peer to peer communication with ssl/tls
+- anyone with root on any node can read any secret from apiserver
+* [[https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/][organizing cluster access using kubeconfig file]]
+- by default, kubectl looks for =$HOME/.kube/config=
+- specify =KUBECONFIG= variable
+- setting =--kubeconfig= flag
+
+** supporting multiple lcuster,uers, authentication mechanism
+- running kubelet might authenticate using certs
+- a user might authenticate using tokens
+- administrators might have sets of certificates that they provide to individual users
+- using kubeconfig file, you can organize clusters, users, namespaces
+- also define contexts to quickly switch between clusters and namespaces
+
+** context
+- context in kubeconfig is used to group access parametes under a convenient name
+- three parametess
+  - cluster
+  - namespace
+  - user
